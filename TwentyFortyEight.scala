@@ -47,6 +47,8 @@ case class Row(row: ArrayBuffer[Int]) {
 	}
 	override def clone = Row(row.clone())
 	override def toString = row.map(c => "%4d".format(c)).mkString(" | ").replace('0', ' ')
+	def filter(p: Int => Boolean) = row.filter(p)
+	def getEmptyIndices: ArrayBuffer[Int] = row.zipWithIndex.filter(_._1 == 0).map(_._2)
 }
 
 object Board {
@@ -91,14 +93,37 @@ object Board {
 			case 3 => down()
 		}
 	}
+
+	def expectMinMax(board: Board, depth: Int, heuristic: Board => Int, isTurn: Boolean = true, direction: Int = -1): (Float, Int) = {
+		println(s"Depth is $depth\tDirection is $direction")
+		println(board)
+
+		if (board.gameOver) return (Int.MinValue, direction)
+		if (board.gameWon) return (Int.MaxValue, direction)
+		if (depth == 0) return (heuristic(board), direction)
+
+		if (isTurn) 
+			board
+				.getDirectionChildren
+				.map{ case (c, d) => expectMinMax(c, depth - 1, heuristic, !isTurn, d) }
+				.maxBy(_._1)
+		else {
+			val score = board
+				.getAddElementChildren
+				.map{ case (c, p) => p * expectMinMax(c, depth - 1, heuristic, !isTurn, direction)._1 }
+				.sum
+			(score, direction)
+		}
+	}
 }
 
 case class Board(board: Board.Matrix) {
 	val rows = 4
 	val cols = 4
 
-	def apply(t: (Int, Int)) = board(t._1)(t._2)
-	def update(t: (Int, Int), n: Int) = board(t._1)(t._2) = n
+	def apply(t: (Int, Int)): Int = board(t._1)(t._2)
+	def apply(x: Int, y: Int): Int = apply((x, y))
+	def update(t: (Int, Int), n: Int): Unit = board(t._1)(t._2) = n
 	
 	def transpose() = {
 		def swap(x: (Int, Int), y: (Int, Int)) = {
@@ -116,14 +141,37 @@ case class Board(board: Board.Matrix) {
 		this != copy
 	}
 
-	def getLegalMoves: Seq[Int] = (0 to 3).toSeq.filter(isLegalMove)
-	def gameOver: Boolean = getLegalMoves.isEmpty
-	def gameWon: Boolean = !board.map(_.row.find(_ == 2048)).isEmpty
+	def getLegalDirections: Seq[Int] = (0 to 3).toSeq.filter(isLegalMove)
+	def getDirectionChildren: Seq[(Board, Int)] = {
+		def cloneAndMove(d: Int) = {
+			val newBoard = this.clone
+			newBoard.move(d)
+			newBoard
+		}
+		
+		getLegalDirections
+			.map(d => (cloneAndMove(d), d))			
+	}
+	def getAddElementChildren: Seq[(Board, Float)] = {
+		def cloneAndAddElements(cell: (Int, Int)) = {
+			val board2 = this.clone
+			board2(cell) = 2
+			val board4 = this.clone
+			board4(cell) = 4
+			Seq((board2, 0.9f), (board4, 0.1f))
+		}
+		val cells = getAllEmptyCells.flatMap(cloneAndAddElements)
+		val sumOfCells = cells.map(_._2).sum
+		cells.map{ case (c, p) => (c, p / sumOfCells) }
+	}
+	def gameOver: Boolean = getLegalDirections.isEmpty
+	def gameWon: Boolean = !board.flatMap(_.row.find(_ == 2048)).isEmpty
 
-	def move(direction: Int, debug: Boolean = false): Boolean = {		
+	def move(direction: Int) = Board.move(this, direction)
+	def moveIfLegal(direction: Int, debug: Boolean = false): Boolean = {		
 		if (!this.isLegalMove(direction)) return false
 
-		Board.move(this, direction)
+		move(direction)
 
 		addNewTile
 
@@ -131,28 +179,29 @@ case class Board(board: Board.Matrix) {
 
 		true
 	}
-	def getRandomCell = (Board.rand.nextInt(4), Board.rand.nextInt(4))
-	def getRandomEmptyCell = {
+	def getRandomCell: (Int, Int) = (Board.rand.nextInt(4), Board.rand.nextInt(4))
+	def getRandomEmptyCell: (Int, Int) = {
 		var newCell = getRandomCell
 		while (this(newCell) != 0) newCell = getRandomCell
 		newCell
 	}
+	def getAllEmptyCells: Seq[(Int, Int)] = {
+		board
+			.zipWithIndex
+			.flatMap{ case (r, x) => r.getEmptyIndices.map(y => (x, y)) }
+	}
 	def addNewTile() = this(getRandomEmptyCell) = Board.getElement
 
 	def triangleScore: Int = {
-		val cells = for (x <- 0 until rows; y <- 0 until cols) yield ((x + y + 2) * this((x, y)))
+		val cells = for (x <- 0 until rows; y <- 0 until cols) yield ((x + y + 2) * this(x, y))
 		cells.sum
 	}
 
-	override def clone() = Board(board.map(_.clone()))
-	override def toString() = board.mkString("\n") + "\n"
+	override def clone = Board(board.map(_.clone()))
+	override def toString = board.mkString("\n") + "\n"
 }
 
 object TwentyFortyEight extends App {
 	val board = Board.create
-	println(board)
-	for (i <- 0 until 10) {		
-		board.move(1, true)
-		board.move(3, true)
-	}
+	println(Board.expectMinMax(board, 2, _.triangleScore))
 }
