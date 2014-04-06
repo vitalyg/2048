@@ -3,6 +3,17 @@ import scala.collection.mutable.ArrayBuffer
 
 object Row {
 	def create: Row = Row(ArrayBuffer.fill[Int](4)(0))
+	def fromRepr(repr: String): Row = {
+		def power(c: Char) = {
+			c match {
+				case '0' => 0
+				case 'A' => 1024
+				case 'B' => 2048
+				case _ => 1 << (c - 48)
+			}
+		}
+		Row(repr.map(power).toBuffer.asInstanceOf[ArrayBuffer[Int]])
+	}
 }
 
 case class Row(row: ArrayBuffer[Int]) {
@@ -72,6 +83,7 @@ object Board {
 		board(second._1)(second._2) = getElement
 		Board(board)
 	}
+	def fromRepr(repr: String): Board = Board(repr.grouped(4).map(Row.fromRepr).toBuffer.asInstanceOf[ArrayBuffer[Row]])
 	def move(board: Board, direction: Int) = {
 		def left() = board.board.foreach(_.left())
 		def right() = board.board.foreach(_.right())
@@ -94,26 +106,38 @@ object Board {
 		}
 	}
 
-	def expectMinMax(board: Board, depth: Int, heuristic: Board => Int, isTurn: Boolean = true, direction: Int = -1): (Float, Int) = {
-		println(s"Depth is $depth\tDirection is $direction")
-		println(board)
+	def expectMinMax(board: Board, depth: Float, heuristic: Board => Int, isTurn: Boolean = true, direction: Int = -1): (Float, Int, Boolean) = {
+		if (board.gameOver) return (Float.MinValue, direction, true)
+		// if (board.gameWon) return (Float.MaxValue, direction, true)
+		if (depth <= 0) return (heuristic(board), direction, false)
 
-		if (board.gameOver) return (Int.MinValue, direction)
-		if (board.gameWon) return (Int.MaxValue, direction)
-		if (depth == 0) return (heuristic(board), direction)
+		/*if (depth > 2) {
+			println(s"Depth is $depth\tDirection is $direction")
+			println(board)
+		}*/
 
-		if (isTurn) 
-			board
-				.getDirectionChildren
-				.map{ case (c, d) => expectMinMax(c, depth - 1, heuristic, !isTurn, d) }
+		val score = if (isTurn) { 
+			val directions = board.getDirectionChildren
+			val stepSize = directions.size / 4.0f
+			val depthDecrease = 0.01f max stepSize
+			
+			directions
+				.map{ case (c, d) => expectMinMax(c, depth - depthDecrease, heuristic, !isTurn, d) }
 				.maxBy(_._1)
+		}
 		else {
 			val score = board
 				.getAddElementChildren
-				.map{ case (c, p) => p * expectMinMax(c, depth - 1, heuristic, !isTurn, direction)._1 }
+				.map{ case (c, p) => p * expectMinMax(c, depth - 1.0f, heuristic, !isTurn, direction)._1 }
 				.sum
-			(score, direction)
+			(score, direction, false)
 		}
+
+		/*if (depth > 2) {
+			println(s"Score is $score")			
+		}*/
+
+		score
 	}
 }
 
@@ -168,7 +192,7 @@ case class Board(board: Board.Matrix) {
 	def gameWon: Boolean = !board.flatMap(_.row.find(_ == 2048)).isEmpty
 
 	def move(direction: Int) = Board.move(this, direction)
-	def moveIfLegal(direction: Int, debug: Boolean = false): Boolean = {		
+	def fullMove(direction: Int, debug: Boolean = false): Boolean = {		
 		if (!this.isLegalMove(direction)) return false
 
 		move(direction)
@@ -196,12 +220,48 @@ case class Board(board: Board.Matrix) {
 		val cells = for (x <- 0 until rows; y <- 0 until cols) yield ((x + y + 2) * this(x, y))
 		cells.sum
 	}
+	def bottomRowScore: Int = {
+		val cells = for (x <- 0 until rows; y <- 0 until cols) yield ((x + 1) * this(x, y))
+		cells.sum
+	}
+	def tileScore(x: Int): Int = {
+		if (x == 2) 0
+		else tileScore(x / 2) * 2 + x
+	}
+
+	def repr: String = {
+		def log(x: Int) = {
+			x match {
+				case 0 => "0"
+				case 1024 => "A"
+				case 2048 => "B"
+				case _ => (math.log(x) / math.log(2)).toInt.toString
+			}
+		}
+		val sb = new StringBuffer(16)
+		for (x <- 0 until rows; y <- 0 until cols)
+			sb.append(log(this(x, y)))
+		sb.toString
+	}
 
 	override def clone = Board(board.map(_.clone()))
-	override def toString = board.mkString("\n") + "\n"
+	override def toString = s"${board.mkString("\n")}\n$repr"
 }
 
 object TwentyFortyEight extends App {
 	val board = Board.create
-	println(Board.expectMinMax(board, 2, _.triangleScore))
+	var move = (-1.0f, -1, false)
+	while (!move._3) {
+		println(board)
+		move = Board.expectMinMax(board, 4, {b: Board => b.triangleScore + b.bottomRowScore})
+		println(s"Score is ${move._1}\n")
+		if (!move._3) board.fullMove(move._2)
+	}
+
+	// val board = Board.fromRepr("0000000001010224")
+	// println(Board.expectMinMax(board, 4, {b: Board => b.triangleScore + b.bottomRowScore}))
+
+	// val board = Board.fromRepr("0000000000020034")
+	// println(board.triangleScore)
+	// println(board.bottomRowScore)
 }
