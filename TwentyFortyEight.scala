@@ -224,10 +224,15 @@ case class Board(board: Board.Matrix) {
 		val cells = for (x <- 0 until rows; y <- 0 until cols) yield ((x + 1) * this(x, y))
 		cells.sum
 	}
-	def tileScore(x: Int): Int = {
-		if (x == 2) 0
-		else tileScore(x / 2) * 2 + x
+	def gameScore: Int = {
+		def tileScore(x: Int): Int = {
+			if (x == 0 || x == 2) 0
+			else tileScore(x / 2) * 2 + x
+		}
+		val cells = for (x <- 0 until rows; y <- 0 until cols) yield tileScore(this(x, y))
+		cells.sum
 	}
+
 
 	def repr: String = {
 		def log(x: Int) = {
@@ -245,7 +250,7 @@ case class Board(board: Board.Matrix) {
 	}
 
 	override def clone = Board(board.map(_.clone()))
-	override def toString = s"${board.mkString("\n")}\n$repr"
+	override def toString = s"${board.mkString("\n")}"
 }
 
 object TwentyFortyEight extends App {
@@ -253,9 +258,11 @@ object TwentyFortyEight extends App {
 	var move = (-1.0f, -1, false)
 	while (!move._3) {
 		println(board)
-		move = Board.expectMinMax(board, 4, {b: Board => b.triangleScore + b.bottomRowScore})
-		println(s"Score is ${move._1}\n")
-		if (!move._3) board.fullMove(move._2)
+		move = Board.expectMinMax(board, 4, {b: Board => b.triangleScore + b.bottomRowScore})		
+		if (!move._3) {
+			board.fullMove(move._2)
+			println(s"Score is ${board.gameScore}\n")
+		}
 	}
 
 	// val board = Board.fromRepr("0000000001010224")
